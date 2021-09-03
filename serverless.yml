@@ -1,5 +1,6 @@
 service: lambda-circuitbreaker-node
 frameworkVersion: '2'
+useDotenv: true
 
 provider:
   name: aws
@@ -9,3 +10,10 @@ provider:
 functions:
   hello:
     handler: handler.hello
+
+  orchestrator:
+    handler: orchestrator.handler
+    description: Orchestrator that make sure jobs are executed when circuit is closed
+    timeout: 300 # maintain state (at least for a little while)  like 5 minutes
+    reservedConcurrency: 1 # make sure it never runs more than once
+    memorySize: 256
