@@ -2,18 +2,63 @@ service: lambda-circuitbreaker-node
 frameworkVersion: '2'
 useDotenv: true
 
+plugins:
+  - serverless-lift
 provider:
   name: aws
   runtime: nodejs14.x
   lambdaHashingVersion: 20201221
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - dynamodb:Query
+        - dynamodb:Scan
+        - dynamodb:GetItem
+        - dynamodb:PutItem
+        - dynamodb:UpdateItem
+        - dynamodb:DeleteItem
+        - dynamodb:ListStreams
+        - lambda:InvokeFunction
+      Resource:
+        - { "Fn::GetAtt": [ "circuitBreakerStatusTable", "Arn" ] }
+
+constructs:
+  jobqueue:
+    type: queue
+    worker:
+      handler: src/handlers/sqs.handler # does nothing but is mandatory see #https://github.com/getlift/lift/blob/master/docs/queue.md#worker
+      timeout: 1
+
+resources:
+  Resources:
+    circuitBreakerStatusTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${env:TABLE_NAME}
+        AttributeDefinitions:
+          - AttributeName: key
+            AttributeType: S
+        KeySchema:
+          - AttributeName: key
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
 
 functions:
-  hello:
-    handler: handler.hello
-
   orchestrator:
-    handler: orchestrator.handler
+    handler: src/handler/orchestrator.handler
     description: Orchestrator that make sure jobs are executed when circuit is closed
     timeout: 300 # maintain state (at least for a little while)  like 5 minutes
     reservedConcurrency: 1 # make sure it never runs more than once
     memorySize: 256
+    environment:
+      QUEUE_URL: ${construct:jobqueue.queueUrl}
+
+  fillqueue:
+    handler: src/handler/fillqueue.handler
+    description: A command that fills up the SQS queue with messages (to test)
+    environment:
+      QUEUE_URL: ${construct:jobqueue.queueUrl}
+      NUMBER_JOBS_TO_TEST: ${env:NUMBER_JOBS_TO_TEST}
+
