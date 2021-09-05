@@ -71,10 +71,13 @@ functions:
     memorySize: 256
     environment:
       QUEUE_URL: { Ref: SQSQueue }
+      ENDPOINT_TO_TEST: ${env:ENDPOINT_TO_TEST}
+      ENDPOINT_API_KEY: ${env:ENDPOINT_API_KEY}
+      FUNCTION_TO_TRIGGER: { Fn::GetAtt: [ CallApiLambdaFunction, Arn ] }
 
   fillqueue:
     handler: src/handler/fillqueue.handler
-    description: Fills up the SQS queue with messages (to test)
+    description: Fills up the SQS queue with messages (to test). Configure nr messages in .env
     environment:
       QUEUE_URL: { Ref: SQSQueue }
       NUMBER_JOBS_TO_TEST: ${env:NUMBER_JOBS_TO_TEST}
@@ -82,10 +85,11 @@ functions:
 
   callApi:
     handler: src/handler/callApi.handler
-    description: Call the external api (with rate limits) and return status code
+    description: Call the external api (with rate limits) and opens circuitbreaker if rate limited
     environment:
       ENDPOINT_TO_TEST: ${env:ENDPOINT_TO_TEST}
       ENDPOINT_API_KEY: ${env:ENDPOINT_API_KEY}
+      QUEUE_URL: { Ref: SQSQueue }
 
   throttledGateway:
     handler: src/handler/gateway.hello
@@ -96,5 +100,5 @@ functions:
           method: GET
           private: true
           throttling:
-            maxRequestsPerSecond: 2
-            maxConcurrentRequests: 2
+            maxRequestsPerSecond: 1
+            maxConcurrentRequests: 1
