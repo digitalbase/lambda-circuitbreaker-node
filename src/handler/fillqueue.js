@@ -16,7 +16,7 @@ exports.handler = async (event) => {
             params.Entries.push({
                 Id: uuid.v4(),
                 MessageBody: JSON.stringify({
-                    fileName: 'foo/bar.mp4'
+                    url: process.env.ENDPOINT_TO_TEST
                 })
             });
         }
@@ -24,5 +24,5 @@ exports.handler = async (event) => {
         await sqs.sendMessageBatch(params).promise();
     }
 
-    return { message: '!', event };
+    return { message: `Added ${messagesAdded} messages to queue` };
 };

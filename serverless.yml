@@ -3,7 +3,6 @@ frameworkVersion: '2'
 useDotenv: true
 
 plugins:
-  - serverless-lift
   - serverless-api-gateway-throttling
 provider:
   name: aws
@@ -12,19 +11,28 @@ provider:
     apiKeys:
       - circuitbreaker
   lambdaHashingVersion: 20201221
-  iamRoleStatements:
-    - Effect: Allow
-      Action:
-        - dynamodb:Query
-        - dynamodb:Scan
-        - dynamodb:GetItem
-        - dynamodb:PutItem
-        - dynamodb:UpdateItem
-        - dynamodb:DeleteItem
-        - dynamodb:ListStreams
-        - lambda:InvokeFunction
-      Resource:
-        - { "Fn::GetAtt": [ "circuitBreakerStatusTable", "Arn" ] }
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:DeleteItem
+          Resource:
+            Fn::GetAtt: [ circuitBreakerStatusTable, Arn ]
+
+        - Effect: Allow
+          Action:
+            - lambda:InvokeFunction
+            - lambda:InvokeAsync
+          Resource: "*"
+
+        - Effect: Allow
+          Action:
+            - sqs:*
+          Resource:
+            Fn::GetAtt: [ SQSQueue, Arn ]
 
 custom:
   # Configures throttling settings for the API Gateway stage
@@ -33,15 +41,13 @@ custom:
     maxRequestsPerSecond: 1000
     maxConcurrentRequests: 500
 
-constructs:
-  jobqueue:
-    type: queue
-    worker:
-      handler: src/handlers/sqs.handler # does nothing but is mandatory see #https://github.com/getlift/lift/blob/master/docs/queue.md#worker
-      timeout: 1
-
 resources:
   Resources:
+    SQSQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: CircuitBreakerQueue
+
     circuitBreakerStatusTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -64,14 +70,22 @@ functions:
     reservedConcurrency: 1 # make sure it never runs more than once
     memorySize: 256
     environment:
-      QUEUE_URL: ${construct:jobqueue.queueUrl}
+      QUEUE_URL: { Ref: SQSQueue }
 
   fillqueue:
     handler: src/handler/fillqueue.handler
-    description: A command that fills up the SQS queue with messages (to test)
+    description: Fills up the SQS queue with messages (to test)
     environment:
-      QUEUE_URL: ${construct:jobqueue.queueUrl}
+      QUEUE_URL: { Ref: SQSQueue }
       NUMBER_JOBS_TO_TEST: ${env:NUMBER_JOBS_TO_TEST}
+      ENDPOINT_TO_TEST: ${env:ENDPOINT_TO_TEST}
+
+  callApi:
+    handler: src/handler/callApi.handler
+    description: Call the external api (with rate limits) and return status code
+    environment:
+      ENDPOINT_TO_TEST: ${env:ENDPOINT_TO_TEST}
+      ENDPOINT_API_KEY: ${env:ENDPOINT_API_KEY}
 
   throttledGateway:
     handler: src/handler/gateway.hello

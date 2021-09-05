@@ -1,11 +1,12 @@
-exports.handler = function(event, context) {
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
-    // context would contain the SQS message
+exports.handler = async (event, context) => {
+    //const messageBody = JSON.parse(event.Body);
+    // const ApiUrlThatIsRateLimited = messageBody.url;
+    //const ApiUrlThatIsRateLimited = process.env.ENDPOINT_TO_TEST;
+    const headers = {
+        'x-api-key': process.env.ENDPOINT_API_KEY,
+    }
 
-    // call API
-        // if success
-        // remove from SQS
-
-        //if fails on rate limit
-        // close circuit
+    return fetch(process.env.ENDPOINT_TO_TEST, { method: 'GET', headers: headers})
 }
