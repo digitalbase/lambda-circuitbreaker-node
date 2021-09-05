@@ -1,0 +1,104 @@
+service: lambda-circuitbreaker-node
+frameworkVersion: '2'
+useDotenv: true
+
+plugins:
+  - serverless-api-gateway-throttling
+provider:
+  name: aws
+  runtime: nodejs14.x
+  apiGateway:
+    apiKeys:
+      - circuitbreaker
+  lambdaHashingVersion: 20201221
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:DeleteItem
+          Resource:
+            Fn::GetAtt: [ circuitBreakerStatusTable, Arn ]
+
+        - Effect: Allow
+          Action:
+            - lambda:InvokeFunction
+            - lambda:InvokeAsync
+          Resource: "*"
+
+        - Effect: Allow
+          Action:
+            - sqs:*
+          Resource:
+            Fn::GetAtt: [ SQSQueue, Arn ]
+
+custom:
+  # Configures throttling settings for the API Gateway stage
+  # They apply to all http endpoints, unless specifically overridden
+  apiGatewayThrottling:
+    maxRequestsPerSecond: 1000
+    maxConcurrentRequests: 500
+
+resources:
+  Resources:
+    SQSQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: CircuitBreakerQueue
+
+    circuitBreakerStatusTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${env:TABLE_NAME}
+        AttributeDefinitions:
+          - AttributeName: key
+            AttributeType: S
+        KeySchema:
+          - AttributeName: key
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+
+functions:
+  orchestrator:
+    handler: src/handler/orchestrator.handler
+    description: Orchestrator that make sure jobs are executed when circuit is closed
+    timeout: 300 # maintain state (at least for a little while)  like 5 minutes
+    reservedConcurrency: 1 # make sure it never runs more than once
+    memorySize: 256
+    environment:
+      QUEUE_URL: { Ref: SQSQueue }
+      ENDPOINT_TO_TEST: ${env:ENDPOINT_TO_TEST}
+      ENDPOINT_API_KEY: ${env:ENDPOINT_API_KEY}
+      FUNCTION_TO_TRIGGER: { Fn::GetAtt: [ CallApiLambdaFunction, Arn ] }
+
+  fillqueue:
+    handler: src/handler/fillqueue.handler
+    description: Fills up the SQS queue with messages (to test). Configure nr messages in .env
+    environment:
+      QUEUE_URL: { Ref: SQSQueue }
+      NUMBER_JOBS_TO_TEST: ${env:NUMBER_JOBS_TO_TEST}
+      ENDPOINT_TO_TEST: ${env:ENDPOINT_TO_TEST}
+
+  callApi:
+    handler: src/handler/callApi.handler
+    description: Call the external api (with rate limits) and opens circuitbreaker if rate limited
+    environment:
+      ENDPOINT_TO_TEST: ${env:ENDPOINT_TO_TEST}
+      ENDPOINT_API_KEY: ${env:ENDPOINT_API_KEY}
+      QUEUE_URL: { Ref: SQSQueue }
+
+  throttledGateway:
+    handler: src/handler/gateway.hello
+    description: Mock gateway with low rate limits, allowing us to test circuitbreaker
+    events:
+      - http:
+          path: /api
+          method: GET
+          private: true
+          throttling:
+            maxRequestsPerSecond: 1
+            maxConcurrentRequests: 1
